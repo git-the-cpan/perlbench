@@ -1,3 +1,14 @@
+1999-04-05   Gisle Aas <gisle@aas.no>
+
+   Release 0.07
+
+   OS/2 patches by Ilya Zakharevich <ilya@math.ohio-state.edu>
+
+   t/hash/set will not grow the hash as much.  Got out of memory
+   problems.
+
+
+
 1998-07-15   Gisle Aas <aas@sn.no>
 
    Release 0.06

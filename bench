@@ -1,6 +1,6 @@
 #!/local/perl/bin/perl -w
 
-# $Id: bench,v 1.4 1997/05/13 22:15:05 aas Exp $
+# $Id: bench,v 1.5 1998/01/04 21:29:24 aas Exp $
 
 require 5.002;
 use strict;
@@ -175,6 +175,7 @@ for $test (@tests) {
 	    }
 	    printf "%8.0f", $points;
 	    $p->{point_sum} += $points;
+	    $p->{no_tests}++;
 	}
     }
     print "\n" unless $VERBOSE;
@@ -184,7 +185,7 @@ unless ($VERBOSE) {
     print "\n";
     printf "%-20s", "AVERAGE";
     for $p (@perls) {
-        printf "%8.0f", $p->{point_sum} / scalar(@tests);
+        printf "%8.0f", $p->{point_sum} / $p->{no_tests};
     }
     print "\n";
 }

@@ -17,6 +17,7 @@ sub main'runtest
 {
     local($scale, $code, $point_factor) = @_;
     $scale = int($scale * $cpu_factor);
+    $scale = 1 if $scale < 1;
     $point_factor = 1000 unless $point_factor;
     $code = <<EOT1 . $code . <<'EOT2';
 \$before_r = time;
@@ -44,8 +45,8 @@ if ($used > 0.1) {
     print "CYCLES/SEC: ", $scale / $used, "\n";
     if (defined $empty_cycles_per_sec) {
 	$loop_overhead = $scale / $empty_cycles_per_sec;
-	$p = $loop_overhead / $used * 100;
-        printf "LOOP OVERHEAD PERCENTAGE: %.1f\n", $p;
+	$p = 100 * $loop_overhead / $used;
+        printf "LOOP OVERHEAD: %.1f%%\n", $p;
 	$used -= $loop_overhead;
 	print "ADJUSTED USED TIME: $used\n";
     }

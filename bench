@@ -1,6 +1,6 @@
-#!/local/perl/bin/perl -w
+#!/usr/bin/perl -w
 
-# $Id: bench,v 1.5 1998/01/04 21:29:24 aas Exp $
+# $Id: bench,v 1.7 1998/01/07 10:05:20 aas Exp $
 
 require 5.002;
 use strict;
@@ -78,6 +78,7 @@ if ($opt_t) {
 # Try to run the empty test in order to time the loop
 for $p (@perls) {
     my $perl = $p->{path};
+    print "Timing empty loop for perl-$p->{version}\n" if $VERBOSE;
     open(P, "$perl empty.t $factor|") or die;
     while (<P>) {
         next unless /^CYCLES\/SEC:\s*(\S+)/;

@@ -1,7 +1,7 @@
 #!perl
 
 # Name: Run HTML::Parser from libwww-perl on the www.perl.com frontpage
-# Require: 5
+# Require: 5.002
 # Desc:
 
 
@@ -303,13 +303,13 @@ exit;
 #-------------------------------------------------------copy---------
 package HTML::Parser;
 
-# $Id: htmlparser.t,v 1.2 1998/01/05 08:45:59 aas Exp $
+# $Id: htmlparser.t,v 1.3 1998/01/07 09:42:23 aas Exp $
 
 use strict;
 #use HTML::Entities ();
 
 use vars qw($VERSION);
-$VERSION = sprintf("%d.%02d", q$Revision: 1.2 $ =~ /(\d+)\.(\d+)/);
+$VERSION = sprintf("%d.%02d", q$Revision: 1.3 $ =~ /(\d+)\.(\d+)/);
 
 
 sub new

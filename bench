@@ -1,19 +1,340 @@
 #!/usr/bin/perl -w
 
-# $Id: bench,v 1.10 1999/04/05 10:21:50 gisle Exp $
+# $Id: bench,v 1.20 2005/12/13 23:03:01 gisle Exp $
 
 require 5.002;
 use strict;
 $| = 1;
 
-my $VERBOSE;
+use Getopt::Std;
+use vars qw($opt_c $opt_t $opt_d $opt_s);
+getopts("c:t:d:s") or usage();
 
+use File::Basename qw(dirname);
+use File::Path qw(mkpath);
+use Cwd qw(abs_path);
+
+my @perls;
+for (@ARGV) {
+    eval {
+	push(@perls, Perl->new($_));
+    };
+    if ($@) {
+	$@ =~ s/ at (.*) line (\d+).*\n//;
+	warn "$@, skipping...\n";
+    }
+}
+
+usage() unless @perls;
+
+# result directory
+my $dir = $opt_d;
+unless ($dir) {
+    my $cnt = 1;
+    while (1) {
+	$dir = sprintf "benchres-%03d", $cnt;
+	last unless -e $dir;
+	$cnt++;
+    }
+}
+mkdir($dir, 0755) || die "Can't mkdir(\"$dir\"): $!";
+
+open(INDEX, ">$dir/index.html") || die "Can't create $dir/index.html: $!";
+print INDEX "<html>\n";
+
+# Show perl configurations
+{
+    my %cnf;
+    my $keymax = length("version");
+    for my $p (@perls) {
+	while (my($k,$v) = each %{$p->{config} || {}}) {
+	    $cnf{$k}{$v}++;
+	    $keymax = length($k) if length($k) > $keymax;
+	}
+    }
+
+    for my $p (@perls) {
+	print "$p->{label}) $p->{fullname}\n";
+	printf "\t%-*s = %s\n", $keymax, "version", $p->{version};
+	printf "\t%-*s = %s\n", $keymax, "path", $p->{path};
+	for my $k (sort keys %{$p->{config} || {}}) {
+	    printf "\t%-*s = %s\n", $keymax, $k, $p->{config}{$k}
+		unless $cnf{$k}{$p->{config}{$k}} == @perls;
+	}
+	print "\n";
+
+	open(RES, ">$dir/CONFIG-$p->{label}.txt") || die;
+	$p->run_cmd(*V, "-V") || die "Can't run $p->{path}: $?";
+	while (<V>) {
+	    print RES $_;
+	}
+	close(V);
+	close(RES) || die "Can't write: $!";
+    }
+}
+
+my $factor = $opt_c;
+unless ($factor) {
+    $factor = `$^X cpu_factor`;
+    chomp($factor);
+    die "Can't calculate cpu speed factor" unless $factor;
+}
+
+file("$dir/CPU_FACTOR", "$factor\n");
+
+# Try to run tests
+die "No test directory found" unless -d 't';
+
+my @tests;
+
+use File::Find;
+find(sub { /\.t$/ && push(@tests, $File::Find::name) }, "t");
+if ($opt_t) {
+    @tests = grep /$opt_t/o, @tests;
+}
+@tests = sort @tests;
+
+# Try to run the empty test in order to time the loop
+for my $p (@perls) {
+    $p->run_cmd(*P, "empty.t", $factor);
+    while (<P>) {
+        next unless /^Cycles-Per-Sec:\s*(\S+)/;
+        $p->{empty_cycles} = int($1);
+    }
+    close(P);
+    die "Could not determine empty test speed for $p->{path}"
+        unless  $p->{empty_cycles};
+    $p->{point_sum} = 0;
+}
+
+# heading
+print INDEX "<table border=1>\n";
+print INDEX "<tr><th>&nbsp;</th>\n";
+
+print "\n";
+print " " x 20;
+for my $p (@perls) {
+    printf "%8s", $p->{label};
+    my $h = htmlesc($p->{label});
+    print INDEX qq(<th><a href="CONFIG-$h.txt">$h</a></th>\n);
+}
+print "\n";
+print INDEX "</th>\n";
+
+print " " x 20;
+for my $p (@perls) {
+    printf "%8s", ("-" x max(3, length($p->{label})));
+}
+print "\n";
+
+
+my $test;
+for $test (@tests) {
+    unless (open(T, $test)) {
+	warn "Can't open $test: $!";
+	next;
+    }
+
+    my $name = $test;
+    $name =~ s,^t/,,;
+    $name =~ s,\.t$,,;
+
+    my $save_file = "$dir/$name/test.txt";
+    mkpath(dirname($save_file), 0, 0755);
+    open(SAVE, ">$save_file") || die "Can't create $save_file: $!";
+    (my $save_file_link = $save_file) =~ s,^\Q$dir\E/,,;
+    $save_file_link = htmlesc($save_file_link);
+
+    printf "%-20s", $name;
+    print INDEX qq(<tr><th align=left><a href="$save_file_link">) . htmlesc($name) . "</a></th>\n";
+
+    my %prop;
+    while (<T>) {
+	print SAVE $_;
+	next unless /^\#\s*(\w+)\s*:\s*(.*)/;
+	my($k,$v) = (lc($1), $2);
+
+	if (defined $prop{$k}) {
+	    $prop{$k} .= "\n$v";
+	} else {
+	    $prop{$k} = $v;
+	}
+    }
+    close(T);
+    close(SAVE) || die "Can't write $save_file: $!";
+
+    my $scale;
+    my $p;
+    for my $p (@perls) {
+	if ($p->{version} < $prop{'require'}) {
+	    # Can't run test
+	    printf "%8s", "N/A";
+	    print INDEX " <td>N/A</td>\n";
+	    next;
+	}
+
+	my $res_file = "$dir/$name/" . $p->{label} . ".txt";
+	mkpath(dirname($res_file), 0, 0755);
+	open(RES, ">$res_file") || die "Can't create $res_file: $!";
+	(my $res_file_link = $res_file) =~ s,^\Q$dir\E/,,;
+	$res_file_link = htmlesc($res_file_link);
+
+	my $points;
+	$p->run_cmd(*P, $test, $factor, $p->{empty_cycles});
+	while (<P>) {
+	    print RES $_;
+	    if (/^Bench-Points:\s+(\S+)/) {
+		$points = $1;
+	    }
+	}
+	close(P);
+	close(RES);
+
+	# present results
+	unless (defined $points) {
+	    printf "%8s", "-";
+	    print INDEX qq( <td><a href="$res_file_link">??</a></td>\n);
+	    next;
+	}
+	unless ($opt_s) {
+	    unless (defined $scale) {
+		$scale = 100 / $points;
+	    }
+	    $points *= $scale;
+	}
+	printf "%8.0f", $points;
+	printf INDEX qq( <td align=right><a href="%s">%.0f</a></td>\n), $res_file_link, $points;
+	$p->{point_sum} += $points;
+	$p->{no_tests}++;
+    }
+    print INDEX "</tr>\n";
+    print "\n";
+}
+
+print "\n";
+printf "%-20s", "AVERAGE";
+for my $p (@perls) {
+    printf "%8.0f", $p->{point_sum} / $p->{no_tests};
+}
+print INDEX "</table>\n";
+print INDEX "</html>\n";
+close(INDEX) || die "Can't write $dir/index.html\n";
+
+
+my $index_url = abs_path($dir);
+if ($^O eq "MSWin32") {
+    $index_url =~ s,\\,/,g;
+    $index_url =~ s,^([A-Za-z]):,/$1|,;
+}
+$index_url = "file://$index_url/index.html";
+
+print "\n\nResults saved in $index_url\n";
+
+
+sub usage
+{
+    $0 =~ s,.*/,,;
+    die "Usage: $0 [options] [lab1=]<perl1> [lab2=]<perl2>...
+
+Recognized options:
+  -s               don't scale numbers (so that first perl is always 100)
+  -t <filter>      only tests that match <filter> regex are timed
+  -c <cpu-factor>  use this factor to scale tests instead of running the
+                   'cpu_factor' program to determine it.
+  -d <dirname>     where to save results
+";
+}
+
+sub max
+{
+    my $max = shift;
+    while (@_) {
+	my $n = shift;
+	$max = $n if $n > $max;
+    }
+    return $max;
+}
+
+sub file {
+    my $name = shift;
+    if (@_) {
+        my $content = shift;
+        open(my $f, ">", $name) || die "Can't create '$name': $!";
+        binmode($f);
+        print $f $content;
+        close($f) || die "Can't write to '$name': $!";
+        if (@_) {
+            my $mode = shift;
+            change_mode($mode, $name);
+        }
+    }
+    else {
+        open(my $f, "<", $name) || return undef;
+        binmode($f);
+        local $/;
+        return scalar <$f>;
+    }
+}
+
+sub htmlesc {
+    my $str = shift;
+    $str =~ s/&/&amp;/g;
+    $str =~ s/</&lt;/g;
+    $str;
+}
+
+BEGIN {
 package Perl;
+
+my $NEXT_LABEL = "A";
 
 sub new
 {
-    my($class, $path, $version) = @_;
-    bless { path => $path, version => $version }, $class;
+    my($class, $path) = @_;
+    my $label;
+    if ($path =~ s/^(\S+)=//) {
+	$label = $1;
+    }
+    else {
+	$label = $NEXT_LABEL++;
+    }
+    unless (-x $path) {
+	die "$path is not executable";
+	next;
+    }
+    my $self = bless { path => $path, label => $label }, $class;
+    $self->run_cmd(*V, '-e', 'print qq(This is perl ), $]+0, qq(\n)');
+    my $version = <V>;
+    close V or die "closing pipe from perl: exit code $?";
+    chomp $version;
+    unless ($version =~ /^This is perl (\d+.\d+)/) {
+	die "$path does not appear to be a working perl";
+    }
+    $self->{version} = $1;
+    $self->run_cmd(*V, '-v');
+    while (<V>) {
+	if (/^This is perl, v(\S+)/) {
+	    $self->{fullname} = "perl-$1";
+	}
+	if (/^Binary build (\d+.*) provided by ActiveState/) {
+	    $self->{fullname} .= " build $1";
+	    $self->{fullname} =~ s/^perl/ActivePerl/;
+	}
+    }
+    close(V);
+
+    if ($self->{version} >= 5) {
+	# The perl should have Configure support.  Try to extract
+	# some key settings
+	my $prog = 'use Config; Config::config_vars(qw(cc ccversion gccversion optimize ccflags usethreads use64bitint use64bitall usemymalloc))';
+	$self->run_cmd(*CONFIG, '-e', $prog);
+	while (<CONFIG>) {
+	   next unless /^(\w+)='([^']+)'/;  #' #
+           $self->{config}{$1} = $2;
+        }
+	close(CONFIG);
+    }
+    return $self;
 }
 
 my $ld_path = Cwd::extLibpath()	 if $^O eq 'os2';
@@ -39,197 +360,7 @@ sub run_cmd
     my @cmd = $self->cmd;
     my $fh = shift;
     my @args = map {/\s/ ? "'$_'" : $_} @_;
-    print "Running '@cmd @args'...\n" if $VERBOSE;
     open($fh, "@cmd @args |") or die "Cannot pipe from '@cmd @args': $!";
 }
 
-package main;
-
-use Getopt::Std;
-use vars qw($opt_v $opt_c $opt_t $opt_s);
-getopts("vc:t:s") or usage();
-
-$VERBOSE = $opt_v;
-
-my @perls;
-for (@ARGV) {
-   unless (-x $_) {
-	warn "$_ is not executable, skipping.\n";
-	next;
-   }
-   my $tmp = Perl->new($_, 'unknown');
-   $tmp->run_cmd(*V, '-e', 'print qq(This is perl ), $]+0, qq(\n)');
-   my $version = <V>;
-   close V or die "closing pipe from perl: exit code $?";
-   chomp $version;
-   unless ($version =~ /^This is perl (\d+.\d+)/) {
-	warn "$_ does not appear to be a working perl, skipping.\n";
-	next;
-   }
-   push(@perls, Perl->new($_, $1+0));
 }
-
-usage() unless @perls;
-
-# Show perl configurations
-my $no = "A";
-my $p;
-for $p (@perls)
-{
-    print "\n" unless $no eq "A";
-    print "$no) perl-$p->{version}\n";
-    printf "\t%-11s = %s\n", "path", $p->{path};
-    if ($p->{version} >= 5) {
-	# The perl should have Configure support.  Try to extract
-	# compiler info.
-	my $prog = 'use Config; Config::config_vars(qw(cc optimize ccflags usemymalloc))';
-	$p->run_cmd(*CONFIG, '-e', $prog);
-	while (<CONFIG>) {
-	   next unless /^(\w+)='([^']+)'/;  #' #
-           $p->{$1} = $2;
-	   printf "\t%-11s = %s\n", $1, $2;
-        }
-    }
-    $no++;
-}
-
-my $factor = $opt_c;
-unless ($factor) {
-    $factor = `$^X cpu_factor`;
-    chomp($factor);
-    die "Can't calculate cpu speed factor" unless $factor;
-}
-
-print "\nCPU SPEED FACTOR = $factor\n" if $VERBOSE;
-
-# Try to run tests
-die "No test directory found" unless -d 't';
-
-my @tests;
-
-use File::Find;
-find(sub { /\.t$/ && push(@tests, $File::Find::name) }, "t");
-if ($opt_t) {
-    @tests = grep /$opt_t/o, @tests;
-}
-@tests = sort @tests;
-
-# Try to run the empty test in order to time the loop
-for $p (@perls) {
-    print "Timing empty loop for perl-$p->{version}\n" if $VERBOSE;
-    $p->run_cmd(*P, "empty.t", $factor);
-    while (<P>) {
-        next unless /^CYCLES\/SEC:\s*(\S+)/;
-        $p->{empty_cycles} = int($1);
-	print if $VERBOSE;
-    }
-    close(P);
-    die "Could not determine empty test speed for $p->{path}"
-        unless  $p->{empty_cycles};
-    $p->{point_sum} = 0;
-}
-
-unless ($VERBOSE) {
-    $no = "A";
-    print "\n";
-    print " " x 20;
-    for $p (@perls) {
-	printf "%8s", $no;
-	$no++;
-    }
-    print "\n";
-
-    print " " x 20;
-    for $p (@perls) {
-	printf "%8s", "----";
-    }
-    print "\n";
-}
-
-my $test;
-for $test (@tests) {
-    unless (open(T, $test)) {
-	warn "Can't open $test: $!";
-	next;
-    }
-    my %prop;
-    my $lines = 20;
-    while (<T>) {
-	last unless $lines--;
-	next unless /^\#\s*(\w+)\s*:\s*(.*)/;
-	my($k,$v) = (lc($1), $2);
-	
-	if (defined $prop{$k}) {
-	    $prop{$k} .= "\n$v";
-	} else {
-	    $prop{$k} = $v;
-	}
-    }
-    close(T);
-
-    if ($VERBOSE) {
-        print "Test properties:\n";
-	for (keys %prop) {
-	    print "\t$_ = $prop{$_}\n";
-	}
-    }
-
-    my $name = $test;
-    $name =~ s,^t/,,;
-    $name =~ s,\.t$,,;
-    printf "%-20s", $name unless $VERBOSE;
-
-    my $scale;
-    my $p;
-    for $p (@perls) {
-	if ($p->{version} < $prop{'require'}) {
-	    # Can't run test
-	    if ($VERBOSE) {
-		print "Perl-$p->{version} can't run the test\n";
-	    } else {
-		printf "%8s", "N/A";
-	    }
-	    next;
-	}
-	my $points = 0;
-	$p->run_cmd(*P, $test, $factor, $p->{empty_cycles});
-	while (<P>) {
-	    print ">>> $_" if $VERBOSE;
-	    if (/^BENCH POINTS:\s+(\S+)/) {
-		$points = $1;
-	    }
-	}
-	close(P);
-
-	unless ($VERBOSE) {
-	    # present results
-	    unless ($opt_s) {
-		unless (defined $scale) {
-		    $scale = 100 / $points;
-		}
-		$points *= $scale;
-	    }
-	    printf "%8.0f", $points;
-	    $p->{point_sum} += $points;
-	    $p->{no_tests}++;
-	}
-    }
-    print "\n" unless $VERBOSE;
-}
-
-unless ($VERBOSE) {
-    print "\n";
-    printf "%-20s", "AVERAGE";
-    for $p (@perls) {
-        printf "%8.0f", $p->{point_sum} / $p->{no_tests};
-    }
-    print "\n";
-}
-
-
-sub usage
-{
-    $0 =~ s,.*/,,;
-    die "Usage: $0 [options] <perl1> <perl2>...\n";
-}
-

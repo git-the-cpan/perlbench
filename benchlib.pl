@@ -15,17 +15,24 @@ $empty_cycles_per_sec = shift;
 
 sub main'runtest
 {
-    local($scale, $code, $point_factor) = @_;
+    local($scale, $code) = @_;
     $scale = int($scale * $cpu_factor);
     $scale = 1 if $scale < 1;
-    $point_factor = 1000 unless $point_factor;
-    $code = <<EOT1 . $code . <<'EOT2';
+    $code = <<'EOT1' . $code . <<EOT2 . $code . <<'EOT3';
+# warm up
+for ($i = 0; $i < 2; $i++) {
+   package main;
+   #---- test code ----
+EOT1
+   #-------------------
+}
+
 \$before_r = time;
 (\$before_u, \$before_s, \$before_cu, \$before_cs) = times;
 for (\$i = 0; \$i < $scale; \$i++) {
    package main;
    #---- test code ----
-EOT1
+EOT2
    #-------------------
 }
 ($after_u, $after_s, $after_cu, $after_cs) = times;
@@ -36,23 +43,23 @@ $system = ($after_s - $before_s) + ($after_cs - $before_cs);
 $real   = ($after_r - $before_r);
 $used   = $user + $system;
 
-print "CYCLES: $scale\n";
-print "USER TIME: $user\n";
-print "SYSTEM TIME: $system\n";
-print "REAL TIME: $real\n";
+print "Cycles: $scale\n";
+print "User-Time: $user\n";
+print "System-Time: $system\n";
+print "Real-Time: $real\n";
 printf "CPU: %.0f%%\n", 100*$used/$real if $real > 0;
 if ($used > 0.1) {
-    print "CYCLES/SEC: ", $scale / $used, "\n";
+    print "Cycles-Per-Sec: ", $scale / $used, "\n";
     if (defined $empty_cycles_per_sec) {
 	$loop_overhead = $scale / $empty_cycles_per_sec;
 	$p = 100 * $loop_overhead / $used;
-        printf "LOOP OVERHEAD: %.1f%%\n", $p;
+        printf "Loop-Overhead: %.1f%%\n", $p;
 	$used -= $loop_overhead;
-	print "ADJUSTED USED TIME: $used\n";
+	print "Adjusted-Used-Time: $used\n";
     }
-    print "BENCH POINTS: ", $point_factor / $used, "\n";
+    print "Bench-Points: ", 1000 / $used, "\n" if $used > 0;
 }
-EOT2
+EOT3
 
     if ($] >= 5.002) {
 	$code = <<'EOT' . $code;

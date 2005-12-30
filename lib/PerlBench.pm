@@ -2,9 +2,9 @@ package PerlBench;
 
 use strict;
 use base 'Exporter';
-our @EXPORT_OK = qw(timeit sec_f);
+our @EXPORT_OK = qw(timeit make_timeit_sub_code sec_f);
 
-our $VERSION = "0.92";
+our $VERSION = "0.93";
 
 use PerlBench::Stats qw(calc_stats);
 use Time::HiRes qw(gettimeofday);
@@ -13,6 +13,7 @@ use Carp qw(croak);
 
 sub timeit {
     my($code, %opt) = @_;
+    my $init = $opt{init};
 
     # XXX auto determine how long we need to time stuff
     my $enough = $opt{enough} || 0.5;
@@ -25,7 +26,7 @@ sub timeit {
 	my $repeat = $opt{repeat} || 1;
 	while (1) {
 	    print STDERR "#  $count ==> " if $opt{verbose};
-	    my $t = timeit_once($code, $count, $repeat);
+	    my $t = timeit_once($code, $init, $count, $repeat);
 	    print STDERR sec_f($t, undef), "\n" if $opt{verbose};
 	    last if $t > $enough;
 	    if ($t < 0.00001) {
@@ -36,7 +37,7 @@ sub timeit {
 		$count *= 2;
 		next;
 	    }
-	    $count = int($count * ($enough / $t) * 1.05);
+	    $count = int($count * ($enough / $t) * 1.05) + 1;
 	}
 	($count, $repeat);
     };
@@ -56,10 +57,11 @@ sub timeit {
     open(my $fh, ">", $pl) || die "Can't create $pl: $!";
     print $fh "#!perl\n";
     print $fh "use strict;\n";
-    print $fh "use Time::HiRes qw(gettimeofday);\n";
+    print $fh "require Time::HiRes;\n";
+    print $fh "{\n    $init;\n" if $init;
     print $fh "my \@TIMEIT = (\n";
     for my $e (@experiment) {
-	print $fh make_timeit_sub_code($code, $e->{loop_count}, $e->{repeat_count}), ",\n";
+	print $fh &make_timeit_sub_code($code, undef, $e->{loop_count}, $e->{repeat_count}), ",\n";
     }
     print $fh ");\n";
 
@@ -75,6 +77,7 @@ for (1.. $trials) {
 }
 print "---\n";
 EOT
+    print $fh "}\n" if $init;
     close($fh) || die "Can't write $pl: $!";
 
     print STDERR "# Running tests...\n" if $opt{verbose};
@@ -153,23 +156,28 @@ sub make_timeit_sub {
 }
 
 sub make_timeit_sub_code {
-    my($code, $loop_count, $repeat_count) = @_;
+    my($code, $init, $loop_count, $repeat_count) = @_;
     $loop_count = int($loop_count);
     die unless $loop_count > 0;
     die if $loop_count + 1 == $loop_count;  # too large
     $repeat_count ||= 1;
-    return <<EOT1 . ($code x $repeat_count) . <<'EOT2';
+    $init = "" unless defined $init;
+    return <<EOT1 . "$init;$code" . <<'EOT2' . ($code x $repeat_count) . <<'EOT3';
 sub {
     my \$COUNT = $loop_count;
     \$COUNT++;
-    my(\$BEFORE_S, \$BEFORE_US) = gettimeofday();
-    while (--\$COUNT) {
+    package main;
 EOT1
+
+    my($BEFORE_S, $BEFORE_US) = Time::HiRes::gettimeofday();
+    while (--$COUNT) {
+EOT2
+
     }
-    my($AFTER_S, $AFTER_US) = gettimeofday();
+    my($AFTER_S, $AFTER_US) = Time::HiRes::gettimeofday();
     return ($AFTER_S - $BEFORE_S) + ($AFTER_US - $BEFORE_US)/1e6;
 }
-EOT2
+EOT3
 }
 
 BEGIN {

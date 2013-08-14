@@ -2,11 +2,12 @@ package PerlBench;
 
 use strict;
 use base 'Exporter';
-our @EXPORT_OK = qw(timeit make_timeit_sub_code sec_f);
+our @EXPORT_OK = qw(timeit timeit_once make_timeit_sub make_timeit_sub_code);
 
-our $VERSION = "0.93";
+our $VERSION = "0.94";
 
 use PerlBench::Stats qw(calc_stats);
+use PerlBench::Utils qw(sec_f);
 use Time::HiRes qw(gettimeofday);
 use Carp qw(croak);
 
@@ -16,7 +17,7 @@ sub timeit {
     my $init = $opt{init};
 
     # XXX auto determine how long we need to time stuff
-    my $enough = $opt{enough} || 0.5;
+    my $enough = $opt{enough} || 1;
 
     # auto determine $loop_count and $repeat_count
     print STDERR "# Determine loop count - enough is " . sec_f($enough) . "\n"
@@ -164,7 +165,7 @@ sub make_timeit_sub_code {
     $init = "" unless defined $init;
     return <<EOT1 . "$init;$code" . <<'EOT2' . ($code x $repeat_count) . <<'EOT3';
 sub {
-    my \$COUNT = $loop_count;
+    my \$COUNT = shift || $loop_count;
     \$COUNT++;
     package main;
 EOT1
@@ -178,62 +179,6 @@ EOT2
     return ($AFTER_S - $BEFORE_S) + ($AFTER_US - $BEFORE_US)/1e6;
 }
 EOT3
-}
-
-BEGIN {
-    my %UNITS = (
-        "h" => 1/3600,
-	"min" => 1/60,
-	"s" => 1,
-	"ms" => 1e3,
-        "µs" => 1e6,
-        "ns" => 1e9,
-    );
-
-    my @UNITS =
-	sort { $b->[1] <=> $a->[1] }
-	map  { [$_ => $UNITS{$_}] }
-	     keys %UNITS;
-
-    sub sec_f {
-	my($t, $d, $u) = @_;
-	my $f;
-	if (defined $u) {
-	    $f = $UNITS{$u} || croak("Unknown unit '$u'");
-	}
-	else {
-	    for (my $i = 1; $i < @UNITS; $i++) {
-		if ($t < 1/$UNITS[$i][1]) {
-		    ($u, $f) = @{$UNITS[$i-1]};
-		    last;
-		}
-	    }
-	    unless ($u) {
-		($u, $f) = @{$UNITS[-1]};
-	    }
-	}
-
-	my $dev = defined($d) ? 1 : "";
-	$d = $t unless $dev;
-
-	if ($f != 1) {
-	    $_ *= $f for $t, $d;
-	}
-
-	my $p = 0;
-	if ($d < 0.05) {
-	    $p = 3;
-	}
-	elsif ($d < 0.5) {
-	    $p = 2;
-	}
-	elsif ($d < 5) {
-	    $p = 1;
-	}
-
-	$dev = sprintf(" ±%.*f", $p, $d) if $dev;
-	return sprintf("%.*f %s%s", $p, $t, $u, $dev);
-    }
 }
 
 1;

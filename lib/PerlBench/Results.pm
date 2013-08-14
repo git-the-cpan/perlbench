@@ -3,6 +3,17 @@ package PerlBench::Results;
 use strict;
 use File::Find ();
 
+my %SIGNIFICANT_CONFIG_KEYS = map { $_ => 1 } qw(
+    cc ccversion gccversion
+    optimize ccflags
+    usethreads usemultiplicity
+    uselargefiles
+    use64bitint use64bitall uselongdouble
+    usemymalloc useshrplib
+    osvers
+);
+
+
 sub new {
     my $class = shift;
     my $resdir = shift || "perlbench-results";
@@ -72,6 +83,26 @@ sub _scan {
 		close($fh);
 	    }
 
+	    if (open(my $fh, "<", "$perldir/config.sh")) {
+		while (<$fh>) {
+		    if (/^(\w+)='([^']*)'$/) {
+			my($k, $v) = ($1, $2);
+			$perlhash->{config}{$1} = $2 if $SIGNIFICANT_CONFIG_KEYS{$1};
+		    }
+		    else {
+			chomp;
+			warn "Can't parse [$_]";
+		    }
+		}
+	    }
+
+	    if (open(my $fh, "<", "$perldir/path.txt")) {
+		if (defined(my $path = <$fh>)) {
+		    chomp($path);
+		    $perlhash->{path} = $path;
+		}
+	    }
+
 	    $perlhash->{dir} = $perldir;
 	    $perlhash->{host} = $hostname;
 	}
@@ -113,7 +144,7 @@ sub perls {
     for my $h (@hosts) {
 	push(@p, values %{$self->{h}{$h}{p}});
     }
-    @p = sort { _vers_cmp($a->{version}, $b->{version}) } @p;
+    @p = sort { _vers_cmp($a->{version}, $b->{version}) || ($a->{config}{osvers} cmp $b->{config}{osvers}) } @p;
     return @p;
 }
 

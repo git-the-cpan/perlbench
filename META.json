@@ -1,5 +1,5 @@
 {
-   "abstract" : "unknown",
+   "abstract" : "Time different perls for certain tasks",
    "author" : [
       "unknown"
    ],
@@ -15,8 +15,12 @@
    "name" : "perlbench",
    "no_index" : {
       "directory" : [
-         "t",
-         "inc"
+         "benchmarks",
+         "perlbench-results",
+         "t"
+      ],
+      "package" : [
+         "Pod::HTML"
       ]
    },
    "prereqs" : {
@@ -32,10 +36,20 @@
       },
       "runtime" : {
          "requires" : {
+            "Cwd" : "0",
+            "File::Basename" : "0",
+            "File::Path" : "0",
+            "Getopt::Std" : "0",
+            "Sys::Hostname" : "0",
             "Time::HiRes" : "0"
          }
       }
    },
-   "release_status" : "stable",
-   "version" : "0.94"
+   "release_status" : "testing",
+   "resources" : {
+      "repository" : {
+         "url" : "https://github.com/briandfoy/perlbench"
+      }
+   },
+   "version" : "0.94_02"
 }

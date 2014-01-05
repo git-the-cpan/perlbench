@@ -3,6 +3,8 @@ package PerlBench::Results;
 use strict;
 use File::Find ();
 
+our $VERSION = "0.96";
+
 my %SIGNIFICANT_CONFIG_KEYS = map { $_ => 1 } qw(
     cc ccversion gccversion
     optimize ccflags

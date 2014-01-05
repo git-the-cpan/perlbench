@@ -4,6 +4,8 @@ use strict;
 use base 'Exporter';
 our @EXPORT_OK = qw(sec_f num_f);
 
+our $VERSION = "0.96";
+
 my %TIME_UNITS = (
     "h" => 1/3600,
     "min" => 1/60,
